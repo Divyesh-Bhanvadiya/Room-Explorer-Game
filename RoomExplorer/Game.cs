@@ -40,9 +40,14 @@ public class Game : GameWindow
     
     // Rendering variables
     private int _vbo, _vao, _ebo;
-    private Shader _shader;
     private Matrix4 _model, _view, _projection;
     private float _time;
+    
+    private Shader _shader;
+    private Camera _camera;
+    private bool _firstMove;
+    private Vector2 _lastPos;
+    private bool _cursorGrabbed = true;
     
     public Game(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings) : base(gameWindowSettings, nativeWindowSettings) 
     {}
@@ -82,17 +87,15 @@ public class Game : GameWindow
         
         // Initialise matrices
         _model = Matrix4.Identity;
-        _view = Matrix4.CreateTranslation(0.0f, 0.0f, -3.0f); // 3 units away from origin
-        _projection = Matrix4.CreatePerspectiveFieldOfView(
-            MathHelper.DegreesToRadians(45.0f),
-            (float) Size.X / Size.Y,
-            0.1f,
-            100.0f
-            );
-            
+        
+        // Initialise Camera
+        _camera = new Camera(new Vector3(0.0f, 1.5f, -3.0f), Size.X / (float) Size.Y); // 3 units away from origin
+        _view = _camera.GetViewMatrix();
+        _projection = _camera.GetProjectionMatrix();
+
+        CursorState = CursorState.Grabbed;
         Console.WriteLine("Game Initialized");
     }
-    
 
     protected override void OnUpdateFrame(FrameEventArgs args)
     {
@@ -101,14 +104,35 @@ public class Game : GameWindow
         // update time
         _time += (float)args.Time;
         
-        // ESC to exit program
+        // ESC to toggle cursor
         if (KeyboardState.IsKeyDown(Keys.Escape))
         {
-            Close();
+            _cursorGrabbed = !_cursorGrabbed;
+            CursorState = _cursorGrabbed ? CursorState.Grabbed : CursorState.Normal;
+
+            if (_cursorGrabbed)
+            {
+                _firstMove = true;
+            }
         }
-        
+
+        // Process movements only if cursor grabbed
+        if (!_cursorGrabbed)
+            return;
+
+        if (KeyboardState.IsKeyDown(Keys.W))
+                _camera.ProcessKeyboard(Camera.CameraMovement.Forward, (float)args.Time);
+        if (KeyboardState.IsKeyDown(Keys.S))
+            _camera.ProcessKeyboard(Camera.CameraMovement.Backward, (float)args.Time);
+        if (KeyboardState.IsKeyDown(Keys.A))
+            _camera.ProcessKeyboard(Camera.CameraMovement.Left, (float)args.Time);
+        if (KeyboardState.IsKeyDown(Keys.D))
+            _camera.ProcessKeyboard(Camera.CameraMovement.Right, (float)args.Time);
+
+        _view = _camera.GetViewMatrix();
+
         // Rotate for test (temp)
-        _model = Matrix4.CreateRotationY(_time) *  Matrix4.CreateRotationX(_time * 0.5f);
+        // _model = Matrix4.CreateRotationY(_time) *  Matrix4.CreateRotationX(_time * 0.5f);
     }
 
     protected override void OnRenderFrame(FrameEventArgs args)
@@ -132,17 +156,36 @@ public class Game : GameWindow
         SwapBuffers();
     }
 
+    protected override void OnMouseMove(MouseMoveEventArgs e)
+    {
+        base.OnMouseMove(e);
+        
+        // process only if cursor grabber
+        if (!_cursorGrabbed)
+            return;
+
+        if (_firstMove)
+        {
+            _lastPos = new Vector2(e.X, e.Y);
+            _firstMove = false;
+        }
+        else
+        {
+            float deltaX = e.X - _lastPos.X;
+            float deltaY = _lastPos.Y - e.Y;
+            
+            _lastPos = new Vector2(e.X, e.Y);
+            _camera.ProcessMouse(deltaX, deltaY);
+        }
+    }
+
     protected override void OnResize(ResizeEventArgs e)
     {
         base.OnResize(e);
         GL.Viewport(0, 0, e.Width, e.Height);
-        
-        _projection = Matrix4.CreatePerspectiveFieldOfView(
-            MathHelper.DegreesToRadians(45.0f),
-            (float) e.Width / e.Height,
-            0.1f,
-            100.0f
-            );
+
+        _camera.AspectRatio = e.Width / (float) e.Height;
+        _projection = _camera.GetProjectionMatrix();
     }
     
     protected override void OnUnload()
