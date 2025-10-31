@@ -9,7 +9,7 @@ namespace RoomExplorer;
 public class Game : GameWindow
 {
     // CUBE
-    private float[] _vertices =
+    private float[] _cubeVertices =
     {
         // positions          // colors
         -0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 0.0f,
@@ -22,7 +22,7 @@ public class Game : GameWindow
         -0.5f,  0.5f,  0.5f,  0.5f, 0.5f, 0.5f
     };
 
-    private uint[] _indices =
+    private uint[] _cubeIndices =
     {
         // Back face
         0, 1, 2, 2, 3, 0,
@@ -38,9 +38,27 @@ public class Game : GameWindow
         3, 2, 6, 6, 7, 3
     };
     
-    // Rendering variables
-    private int _vbo, _vao, _ebo;
-    private Matrix4 _model, _view, _projection;
+    // PLANE (floor, wall, ceiling) (1x1)
+    private float[] _planeVertices = 
+    {
+        // positions          // colors (white)    // texture coords (tiling)
+        -0.5f, 0.0f, -0.5f,  1.0f, 1.0f, 1.0f,  0.0f, 0.0f,
+        0.5f, 0.0f, -0.5f,  1.0f, 1.0f, 1.0f,  5.0f, 0.0f,  
+        0.5f, 0.0f,  0.5f,  1.0f, 1.0f, 1.0f,  5.0f, 5.0f,
+        -0.5f, 0.0f,  0.5f,  1.0f, 1.0f, 1.0f,  0.0f, 5.0f
+    };
+
+    private uint[] _planeIndices = 
+    {
+        0, 1, 2,
+        2, 3, 0
+    };
+
+    // Buffer objects 
+    private int _planeVBO, _planeVAO, _planeEBO;
+    private int _cubeVBO, _cubeVAO, _cubeEBO;
+    
+    private Matrix4 _view, _projection;
     private float _time;
     
     private Shader _shader;
@@ -58,42 +76,20 @@ public class Game : GameWindow
         
         GL.ClearColor(0.2f, 0.3f, 0.3f, 1.0f); // greenish gray BG
         GL.Enable(EnableCap.DepthTest);
-        
-        // generate and bind VAO
-        _vao = GL.GenVertexArray();
-        GL.BindVertexArray(_vao);
-        
-        // generate and bind VBO
-        _vbo = GL.GenBuffer();
-        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
-        GL.BufferData(BufferTarget.ArrayBuffer, _vertices.Length * sizeof(float), _vertices, BufferUsageHint.StaticDraw);
-        
-        // generate and bind EBO
-        _ebo = GL.GenBuffer();
-        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
-        GL.BufferData(BufferTarget.ElementArrayBuffer,  _indices.Length * sizeof(uint), _indices, BufferUsageHint.StaticDraw);
-            
-        // setup VAO
-        // Location = 0
-        GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
-        GL.EnableVertexAttribArray(0);
-        
-        // Color = 1
-        GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
-        GL.EnableVertexAttribArray(1);
+
+        SetupCube();
+        SetupPlane();
         
         // Shader Compilation
         _shader = new Shader("Shaders/shader.vert", "Shaders/shader.frag");
         
-        // Initialise matrices
-        _model = Matrix4.Identity;
-        
         // Initialise Camera
-        _camera = new Camera(new Vector3(0.0f, 1.5f, -3.0f), Size.X / (float) Size.Y); // 3 units away from origin
+        _camera = new Camera(new Vector3(0.0f, 1.5f, 4.0f), Size.X / (float) Size.Y);
         _view = _camera.GetViewMatrix();
         _projection = _camera.GetProjectionMatrix();
-
+        
         CursorState = CursorState.Grabbed;
+        _lastPos = new Vector2(MousePosition.X, MousePosition.Y);
         Console.WriteLine("Game Initialized");
     }
 
@@ -129,10 +125,10 @@ public class Game : GameWindow
         if (KeyboardState.IsKeyDown(Keys.D))
             _camera.ProcessKeyboard(Camera.CameraMovement.Right, (float)args.Time);
 
+        _camera.Position = ApplyCollision(_camera.Position);
+        
         _view = _camera.GetViewMatrix();
 
-        // Rotate for test (temp)
-        // _model = Matrix4.CreateRotationY(_time) *  Matrix4.CreateRotationX(_time * 0.5f);
     }
 
     protected override void OnRenderFrame(FrameEventArgs args)
@@ -145,13 +141,62 @@ public class Game : GameWindow
         _shader.Use();
         
         // set matrix uniforms
-        _shader.SetMatrix4("model", _model);
         _shader.SetMatrix4("view", _view);
         _shader.SetMatrix4("projection", _projection);
         
-        // DRAW
-        GL.BindVertexArray(_vao);
-        GL.DrawElements(PrimitiveType.Triangles, _indices.Length, DrawElementsType.UnsignedInt, 0);
+        // DRAW FLOOR
+        Matrix4 floorModel = Matrix4.CreateScale(10.0f, 1.0f, 10.0f) * 
+                             Matrix4.CreateTranslation(0.0f, 0.0f, 0.0f);
+        _shader.SetMatrix4("model", floorModel);
+        GL.BindVertexArray(_planeVAO);
+        GL.DrawElements(PrimitiveType.Triangles, _planeIndices.Length, DrawElementsType.UnsignedInt, 0);
+        
+        // DRAW CEILING
+        Matrix4 ceilingModel = Matrix4.CreateScale(10.0f, 1.0f, 10.0f) * 
+                             Matrix4.CreateTranslation(0.0f, 5.0f, 0.0f);
+        _shader.SetMatrix4("model", ceilingModel);
+        GL.BindVertexArray(_planeVAO);
+        GL.DrawElements(PrimitiveType.Triangles, _planeIndices.Length, DrawElementsType.UnsignedInt, 0);
+        
+        
+        // DRAW BACK WALL (+Z)
+        Matrix4 backWallModel = Matrix4.CreateScale(10.0f, 1.0f, 5.0f) *
+                                 Matrix4.CreateRotationX(MathHelper.DegreesToRadians(90.0f)) *
+                                 Matrix4.CreateTranslation(0.0f, 2.5f, 5.0f);
+        _shader.SetMatrix4("model", backWallModel);
+        GL.BindVertexArray(_planeVAO);
+        GL.DrawElements(PrimitiveType.Triangles, _planeIndices.Length, DrawElementsType.UnsignedInt, 0);
+        
+        // DRAW FRONT WALL (-Z) 
+        Matrix4 frontWallModel = Matrix4.CreateScale(10.0f, 1.0f, 5.0f) *
+                                 Matrix4.CreateRotationX(MathHelper.DegreesToRadians(90.0f)) *
+                                 Matrix4.CreateTranslation(0.0f, 2.5f, -5.0f);
+        _shader.SetMatrix4("model", frontWallModel);
+        GL.BindVertexArray(_planeVAO);
+        GL.DrawElements(PrimitiveType.Triangles, _planeIndices.Length, DrawElementsType.UnsignedInt, 0);
+        
+        // DRAW LEFT WALL (X)
+        Matrix4 leftWallModel = Matrix4.CreateScale(5.0f, 1.0f, 10.0f) *
+                                 Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(-90.0f)) *
+                                 Matrix4.CreateTranslation(-5.0f, 2.5f, 0.0f);
+        _shader.SetMatrix4("model", leftWallModel);
+        GL.BindVertexArray(_planeVAO);
+        GL.DrawElements(PrimitiveType.Triangles, _planeIndices.Length, DrawElementsType.UnsignedInt, 0);
+
+        // DRAW RIGHT WALL (X) 
+        Matrix4 rightWallModel = Matrix4.CreateScale(5.0f, 1.0f, 10.0f) *
+                                 Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(-90.0f)) *
+                                 Matrix4.CreateTranslation(5.0f, 2.5f, 0.0f);
+        _shader.SetMatrix4("model", rightWallModel);
+        GL.BindVertexArray(_planeVAO);
+        GL.DrawElements(PrimitiveType.Triangles, _planeIndices.Length, DrawElementsType.UnsignedInt, 0);
+
+        // DRAW SPINNING CUBE  
+        Matrix4 _cubeModel =  Matrix4.CreateTranslation(0.0f, 1f, 0.0f) * 
+                              Matrix4.CreateRotationY(_time);
+        _shader.SetMatrix4("model", _cubeModel);
+        GL.BindVertexArray(_cubeVAO);
+        GL.DrawElements(PrimitiveType.Triangles, _cubeIndices.Length, DrawElementsType.UnsignedInt, 0);
         
         SwapBuffers();
     }
@@ -166,15 +211,15 @@ public class Game : GameWindow
 
         if (_firstMove)
         {
-            _lastPos = new Vector2(e.X, e.Y);
+            _lastPos = e.Position;
             _firstMove = false;
         }
         else
         {
-            float deltaX = e.X - _lastPos.X;
-            float deltaY = _lastPos.Y - e.Y;
+            float deltaX = e.Position.X - _lastPos.X;
+            float deltaY = _lastPos.Y - e.Position.Y;
             
-            _lastPos = new Vector2(e.X, e.Y);
+            _lastPos = e.Position;
             _camera.ProcessMouse(deltaX, deltaY);
         }
     }
@@ -192,9 +237,82 @@ public class Game : GameWindow
     {
         base.OnUnload();
         
-        GL.DeleteBuffer(_vbo);
-        GL.DeleteBuffer(_ebo);
-        GL.DeleteVertexArray(_vao);
+        GL.DeleteBuffer(_cubeVBO);
+        GL.DeleteBuffer(_cubeEBO);
+        GL.DeleteVertexArray(_cubeVAO);
+        
+        GL.DeleteBuffer(_planeVBO);
+        GL.DeleteBuffer(_planeEBO);
+        GL.DeleteVertexArray(_planeVAO);
+        
         _shader.Dispose();
+    }
+
+    private void SetupPlane()
+    {
+        _planeVAO = GL.GenVertexArray();
+        GL.BindVertexArray(_planeVAO);
+        
+        _planeVBO = GL.GenBuffer();
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _planeVBO);
+        GL.BufferData(BufferTarget.ArrayBuffer, _planeVertices.Length * sizeof(float), _planeVertices, BufferUsageHint.StaticDraw);
+        
+        _planeEBO = GL.GenBuffer();
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _planeEBO);
+        GL.BufferData(BufferTarget.ElementArrayBuffer, _planeIndices.Length * sizeof(uint), _planeIndices, BufferUsageHint.StaticDraw);
+        
+        // location = 0
+        GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 8 * sizeof(float), 0);
+        GL.EnableVertexAttribArray(0);
+    
+        // color = 1
+        GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 8 * sizeof(float),3 * sizeof(float));
+        GL.EnableVertexAttribArray(1);
+        
+        // texture = 2
+        GL.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, 8 * sizeof(float), 6 *  sizeof(float));
+        GL.EnableVertexAttribArray(2);
+        
+    }
+    
+    private void SetupCube()
+    {
+        _cubeVAO = GL.GenVertexArray();
+        GL.BindVertexArray(_cubeVAO);
+        
+        _cubeVBO = GL.GenBuffer();
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _cubeVBO);
+        GL.BufferData(BufferTarget.ArrayBuffer, _cubeVertices.Length * sizeof(float), _cubeVertices, BufferUsageHint.StaticDraw);
+        
+        _cubeEBO = GL.GenBuffer();
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _cubeEBO);
+        GL.BufferData(BufferTarget.ElementArrayBuffer, _cubeIndices.Length * sizeof(uint), _cubeIndices, BufferUsageHint.StaticDraw);
+        
+        // location = 0
+        GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
+        GL.EnableVertexAttribArray(0);
+    
+        // color = 1
+        GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float),3 * sizeof(float));
+        GL.EnableVertexAttribArray(1);
+        
+    }
+    
+    private Vector3 ApplyCollision(Vector3 newPosition)
+    {
+        // Room boundaries 
+        float minX = -4.5f;
+        float maxX = 4.5f;
+        float minZ = -4.5f;
+        float maxZ = 4.5f;
+    
+        // Clamp position to stay inside room
+        newPosition.X = Math.Clamp(newPosition.X, minX, maxX);
+        newPosition.Z = Math.Clamp(newPosition.Z, minZ, maxZ);
+    
+        // Keep Y locked at eye height
+        newPosition.Y = 1.5f;
+    
+        return newPosition;
     }
 }
