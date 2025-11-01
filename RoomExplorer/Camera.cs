@@ -21,8 +21,8 @@ public class Camera
     // options
     public float AspectRatio {get; set;}
     public float Fov { get; set; } = 45.0f;
-    public float Speed { get; set; } = 2.5f;
-    public float Sensitivity { get; set; } = 0.1f;
+    public float Speed { get; set; } = 5.0f;
+    public float Sensitivity { get; set; } = 0.2f;
     
     public Camera(Vector3 position, float aspectRatio)
     {
