@@ -62,10 +62,14 @@ public class Game : GameWindow
     private float _time;
     
     private Shader _shader;
+    private Texture _floorTexture, _wallTexture;
     private Camera _camera;
     private bool _firstMove;
     private Vector2 _lastPos;
     private bool _cursorGrabbed = true;
+    
+    private Vector3 _targetCubePosition = new Vector3(4.0f, 0.35f, -3.5f);
+    private float _glowIntensity = 0.0f;
     
     public Game(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings) : base(gameWindowSettings, nativeWindowSettings) 
     {}
@@ -82,6 +86,11 @@ public class Game : GameWindow
         
         // Shader Compilation
         _shader = new Shader("Shaders/shader.vert", "Shaders/shader.frag");
+        
+        // Load Texture
+        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        _floorTexture = new Texture(Path.Combine(baseDir, "Textures", "floorTex.png"));
+        _wallTexture = new Texture(Path.Combine(baseDir, "Textures", "wallTex.png"));
         
         // Initialise Camera
         _camera = new Camera(new Vector3(0.0f, 1.5f, 4.0f), Size.X / (float) Size.Y);
@@ -125,6 +134,22 @@ public class Game : GameWindow
         if (KeyboardState.IsKeyDown(Keys.D))
             _camera.ProcessKeyboard(Camera.CameraMovement.Right, (float)args.Time);
 
+        // Check distance to target cube
+        float distanceToTarget = Vector3.Distance(
+            new Vector3(_camera.Position.X, 0, _camera.Position.Z),  // Player XZ position
+            new Vector3(_targetCubePosition.X, 0, _targetCubePosition.Z)  // Target XZ position
+        );
+
+        // Update glow intensity based on distance
+        if (distanceToTarget < 2.5f)
+        {
+            _glowIntensity = 0.1f + 0.4f * MathF.Sin(_time * 6.0f); 
+        }
+        else
+        {
+            _glowIntensity = 0.0f;  
+        }
+        
         _camera.Position = ApplyCollision(_camera.Position);
         
         _view = _camera.GetViewMatrix();
@@ -145,11 +170,16 @@ public class Game : GameWindow
         _shader.SetMatrix4("projection", _projection);
         
         // DRAW FLOOR
+        _floorTexture.Use(TextureUnit.Texture0);
+        _shader.SetInt("texture1", 0);
+        _shader.SetInt("useTexture", 1);
+        
         Matrix4 floorModel = Matrix4.CreateScale(10.0f, 1.0f, 10.0f) * 
                              Matrix4.CreateTranslation(0.0f, 0.0f, 0.0f);
         _shader.SetMatrix4("model", floorModel);
         GL.BindVertexArray(_planeVAO);
         GL.DrawElements(PrimitiveType.Triangles, _planeIndices.Length, DrawElementsType.UnsignedInt, 0);
+        _shader.SetInt("useTexture", 0);
         
         // DRAW CEILING
         Matrix4 ceilingModel = Matrix4.CreateScale(10.0f, 1.0f, 10.0f) * 
@@ -160,6 +190,9 @@ public class Game : GameWindow
         
         
         // DRAW BACK WALL (+Z)
+        _wallTexture.Use(TextureUnit.Texture0);
+        _shader.SetInt("useTexture", 1);
+        
         Matrix4 backWallModel = Matrix4.CreateScale(10.0f, 1.0f, 5.0f) *
                                  Matrix4.CreateRotationX(MathHelper.DegreesToRadians(90.0f)) *
                                  Matrix4.CreateTranslation(0.0f, 2.5f, 5.0f);
@@ -190,13 +223,34 @@ public class Game : GameWindow
         _shader.SetMatrix4("model", rightWallModel);
         GL.BindVertexArray(_planeVAO);
         GL.DrawElements(PrimitiveType.Triangles, _planeIndices.Length, DrawElementsType.UnsignedInt, 0);
+        _shader.SetInt("useTexture", 0);
 
-        // DRAW SPINNING CUBE  
-        Matrix4 _cubeModel =  Matrix4.CreateTranslation(0.0f, 1f, 0.0f) * 
+        // DRAW CUBES  
+        //spinning
+        Matrix4 cube1Model =  Matrix4.CreateTranslation(0.0f, 0.5f, 0.0f) * 
                               Matrix4.CreateRotationY(_time);
-        _shader.SetMatrix4("model", _cubeModel);
+        _shader.SetMatrix4("model", cube1Model);
         GL.BindVertexArray(_cubeVAO);
         GL.DrawElements(PrimitiveType.Triangles, _cubeIndices.Length, DrawElementsType.UnsignedInt, 0);
+
+        Matrix4 cube2Model = Matrix4.CreateScale(0.8f) * Matrix4.CreateTranslation(-3.0f, 0.4f, -2.0f);
+        _shader.SetMatrix4("model", cube2Model);
+        GL.BindVertexArray(_cubeVAO);
+        GL.DrawElements(PrimitiveType.Triangles, _cubeIndices.Length, DrawElementsType.UnsignedInt, 0);
+
+        Matrix4 cube3Model = Matrix4.CreateScale(0.6f) *Matrix4.CreateTranslation(3.5f, 0.3f, 1.0f); 
+        _shader.SetMatrix4("model", cube3Model);
+        GL.BindVertexArray(_cubeVAO);
+        GL.DrawElements(PrimitiveType.Triangles, _cubeIndices.Length, DrawElementsType.UnsignedInt, 0);
+
+        // winning (target) cube
+        // _shader.SetInt("useTexture", 1);
+        _shader.SetFloat("glowIntensity", _glowIntensity);
+        Matrix4 targetCubeModel = Matrix4.CreateScale(0.7f) * Matrix4.CreateTranslation(_targetCubePosition); 
+        _shader.SetMatrix4("model", targetCubeModel);
+        GL.BindVertexArray(_cubeVAO);
+        GL.DrawElements(PrimitiveType.Triangles, _cubeIndices.Length, DrawElementsType.UnsignedInt, 0);
+        _shader.SetFloat("glowIntensity", 0.0f);
         
         SwapBuffers();
     }
@@ -246,6 +300,8 @@ public class Game : GameWindow
         GL.DeleteVertexArray(_planeVAO);
         
         _shader.Dispose();
+        _floorTexture.Dispose();
+        _wallTexture.Dispose();
     }
 
     private void SetupPlane()
